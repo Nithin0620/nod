@@ -3248,6 +3248,17 @@ test('secret redaction covers prefixed assignment names and object keys', () => 
     JSON.stringify(redact({ span: 'safe', japan: 'safe' })),
     '{"span":"safe","japan":"safe"}',
   );
+  assert.deepEqual(redact(['Enter your password', 'one', 'two']), [
+    'Enter your password',
+    'one',
+    'two',
+  ]);
+  assert.deepEqual(withoutSecretKeys(['Enter your password', 'one', 'two']), [
+    'Enter your password',
+    'one',
+    'two',
+  ]);
+  assert.deepEqual(redact(['password', 'one', 'two']), ['password', '[redacted]']);
 });
 
 test('secret redaction keeps valid tokens when another token is missing', () => {

@@ -39,6 +39,10 @@ const base64Data = /\bdata:[^,\s]+;base64,[A-Za-z0-9+/=]+/g;
 const tokenShapes = String.raw`\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b|${privateKeyStart}`;
 export const secretToken = new RegExp(tokenShapes);
 
+export function secretFieldName(key: string) {
+  return secretKey.test(key.replace(/[^a-z0-9]/gi, ''));
+}
+
 export function secretField(key: string) {
   const normalized = key.replace(/[^a-z0-9]/gi, '');
   return secretKey.test(normalized) || secretSuffix.test(normalized);
@@ -203,7 +207,7 @@ function compileRedactor(
       if (Buffer.isBuffer(item) || item instanceof Uint8Array) return '[binary omitted]';
       if (item instanceof Date) return Number.isFinite(item.getTime()) ? item.toISOString() : null;
       if (Array.isArray(item)) {
-        if (typeof item[0] === 'string' && secretField(item[0])) return [text(item[0]), hidden];
+        if (typeof item[0] === 'string' && secretFieldName(item[0])) return [text(item[0]), hidden];
         const result = item.slice(0, 100).map((entry) => visit(entry, depth + 1));
         if (item.length > 100) result.push('[truncated]');
         return result;
@@ -276,7 +280,7 @@ export function createCommandRedactor(secrets: string[]) {
 
 export function withoutSecretKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
-    const namedSecret = typeof value[0] === 'string' && secretField(value[0]);
+    const namedSecret = typeof value[0] === 'string' && secretFieldName(value[0]);
     return value.map((entry, index) =>
       namedSecret && index === 1 ? hidden : withoutSecretKeys(entry),
     );
