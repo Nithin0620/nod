@@ -3295,6 +3295,7 @@ test('secret field values stay private in every supported representation', () =>
         name,
       );
       assert.deepEqual(clean([name, canary, tail]), [name, '[redacted]'], name);
+      assert.deepEqual(clean([name]), [name], name);
     }
     for (const input of [
       `${name}=${canary}`,
@@ -3340,6 +3341,28 @@ test('secret field values stay private in every supported representation', () =>
   const keyError = createTextRedactor(['PRIVATE KEY'])(keyBlock);
   assert.ok(keyError.startsWith('Synthetic failure:'));
   assert.ok(!keyError.includes(canary));
+  for (const label of ['PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'OPENSSH PRIVATE KEY']) {
+    const start = `-----BEGIN ${label}-----`;
+    const end = `-----END ${label}-----`;
+    const suffix = 'Public status: denied';
+    const closed = `${start}\n${canary}\n${end}\n${suffix}`;
+    for (const clean of [redactSecretText, createTextRedactor([])]) {
+      for (const input of [closed, `${closed}\n${closed}`]) {
+        const output = clean(input);
+        assert.ok(!output.includes(canary), label);
+        assert.ok(output.endsWith(suffix), label);
+      }
+      for (const broken of [
+        `${start}\n${canary}\n${tail}`,
+        `${start}\n${canary}\n-----END CERTIFICATE-----\n${tail}`,
+        `${start}\n${canary}\n${start}\n${end}\n${tail}`,
+      ]) {
+        const hidden = clean(broken);
+        assert.ok(!hidden.includes(canary), label);
+        assert.ok(!hidden.includes(tail), label);
+      }
+    }
+  }
   const manyPublicFields = `${'publicField=ok\n'.repeat(9000)}GITHUB_TOKEN=${canary}\nFinal public reason`;
   const largeOutput = createTextRedactor([])(manyPublicFields);
   assert.ok(!largeOutput.includes(canary));

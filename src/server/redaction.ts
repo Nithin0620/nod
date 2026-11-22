@@ -96,8 +96,16 @@ export function secretTextSpans(input: string) {
         ),
       true,
     );
-  const keyStart = new RegExp(privateKeyStart).exec(input);
-  if (keyStart) addRedactionSpan(spans, keyStart.index, input.length, hidden);
+  let keyEnd = 0;
+  redactionMatches(input, new RegExp(privateKeyStart, 'g'), (match) => {
+    if (match.index < keyEnd) return;
+    const bodyStart = match.index + match[0].length;
+    const endMarker = match[0].replace('-----BEGIN ', '-----END ');
+    const end = input.indexOf(endMarker, bodyStart);
+    const nested = input.indexOf('-----BEGIN ', bodyStart);
+    keyEnd = end >= 0 && (nested < 0 || nested > end) ? end + endMarker.length : input.length;
+    addRedactionSpan(spans, match.index, keyEnd, hidden);
+  });
   whole(bearerToken);
   redactionMatches(
     input,
@@ -227,7 +235,8 @@ function compileRedactor(
       if (Buffer.isBuffer(item) || item instanceof Uint8Array) return '[binary omitted]';
       if (item instanceof Date) return Number.isFinite(item.getTime()) ? item.toISOString() : null;
       if (Array.isArray(item)) {
-        if (typeof item[0] === 'string' && secretField(item[0])) return [text(item[0]), hidden];
+        if (item.length > 1 && typeof item[0] === 'string' && secretField(item[0]))
+          return [text(item[0]), hidden];
         const result = item.slice(0, 100).map((entry) => visit(entry, depth + 1));
         if (item.length > 100) result.push('[truncated]');
         return result;
@@ -300,7 +309,8 @@ export function createCommandRedactor(secrets: string[]) {
 
 export function withoutSecretKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
-    if (typeof value[0] === 'string' && secretField(value[0])) return [value[0], hidden];
+    if (value.length > 1 && typeof value[0] === 'string' && secretField(value[0]))
+      return [value[0], hidden];
     return value.map(withoutSecretKeys);
   }
   if (!value || typeof value !== 'object') return value;

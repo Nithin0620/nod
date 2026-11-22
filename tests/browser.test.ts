@@ -3363,6 +3363,17 @@ test('feedback redaction checks original text and structure before masking', asy
       privateParts: [opaque],
     },
     { id: 'tuple-control', input: tuple, privateParts: [opaque] },
+    ...['PRIVATE KEY', 'RSA PRIVATE KEY'].map((label) => ({
+      id: `closed-key-keeps-tail-${label}`,
+      input: `-----BEGIN ${label}-----\n${opaque}\n-----END ${label}-----\nPublic status: denied`,
+      privateParts: [opaque],
+      kept: ['Public status: denied'],
+    })),
+    {
+      id: 'mismatched-key-end',
+      input: `-----BEGIN RSA PRIVATE KEY-----\n${opaque}\n-----END PRIVATE KEY-----\nPrivateTrailingValue`,
+      privateParts: [opaque, 'PrivateTrailingValue'],
+    },
     ...[
       'GITHUB_TOKEN',
       'db_password',
@@ -3858,6 +3869,8 @@ test('feedback redaction checks original text and structure before masking', asy
       if (probe.id === 'technical-control') assert.deepEqual(JSON.parse(encoded), probe.input);
     });
   }
+  const redactor = createFeedbackRedactor({ secrets: [], profile: { names: [] } });
+  for (const name of ['GITHUB_TOKEN', 'password']) assert.deepEqual(redactor.value([name]), [name]);
 });
 
 test('feedback redaction advances Unicode overlaps and resets recursive checks between calls', async () => {
