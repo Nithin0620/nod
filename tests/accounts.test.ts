@@ -3327,6 +3327,7 @@ test('secret field values stay private in every supported representation', () =>
       );
     }
   }
+  assert.equal(redactSecretText('span=safe japan=safe'), 'span=safe japan=safe');
   const maskedLabel = createTextRedactor(['GITHUB_TOKEN']);
   assert.ok(!maskedLabel(`GITHUB_TOKEN=${canary}`).includes(canary));
   const overlapping = createTextRedactor(['AlphaBridge', 'BridgeOmega']);
