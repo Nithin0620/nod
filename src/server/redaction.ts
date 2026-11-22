@@ -1,4 +1,9 @@
-import { addRedactionSpan, redactionMatches, type RedactionSpan } from './redaction-spans.ts';
+import {
+  addRedactionSpan,
+  redactionMatches,
+  renderRedactionSpans,
+  type RedactionSpan,
+} from './redaction-spans.ts';
 export { environmentSecrets } from '../shared/environment-secrets.mjs';
 
 const payloadDefault = 16_384;
@@ -9,23 +14,19 @@ const secretKey = new RegExp(`^(?:${secretNames})$`, 'i');
 const secretSuffix = new RegExp(
   `(?:${secretNames
     .split('|')
-    .filter((name) => name.length >= 5)
+    .map((name) => `${name.length < 5 ? '(?:^|_)' : ''}${name.split('').join('_*')}`)
     .join('|')})$`,
   'i',
 );
+const fieldCharacters = String.raw`[\p{L}\p{N}_.$-]`;
+const fieldIdentifier = new RegExp(`^${fieldCharacters}+$`, 'u');
 const secretAssignment = new RegExp(
-  String.raw`((["']?)(?:[-_]|\b)(?:${secretNames
-    .split('|')
-    .map((name) => name.split('').join('[-_]?'))
-    .join('|')})["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\s,;}&]+)`,
-  'gi',
+  String.raw`((["']?)(?<!${fieldCharacters})(${fieldCharacters}+)\2\s*[:=]\s*)`,
+  'gu',
 );
+const assignmentValue = /"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\s,;}&]+/y;
 
 const privateKeyStart = '-----BEGIN [^-]*PRIVATE KEY-----';
-const privateKeyBlock = new RegExp(
-  privateKeyStart + String.raw`[\s\S]*?-----END [^-]*PRIVATE KEY-----`,
-  'g',
-);
 const bearerToken = /\bBearer\s+[A-Za-z0-9+/_.=:~-]+/gi;
 const basicToken = /\bBasic\s+([A-Za-z0-9+/_.=:-]+)/gi;
 const privateHeader =
@@ -39,13 +40,32 @@ const base64Data = /\bdata:[^,\s]+;base64,[A-Za-z0-9+/=]+/g;
 const tokenShapes = String.raw`\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|glpat-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b|${privateKeyStart}`;
 export const secretToken = new RegExp(tokenShapes);
 
-export function secretFieldName(key: string) {
-  return secretKey.test(key.replace(/[^a-z0-9]/gi, ''));
+export function secretField(key: string) {
+  if (secretKey.test(key.replace(/[^a-z0-9]/gi, ''))) return true;
+  return (
+    fieldIdentifier.test(key) &&
+    secretSuffix.test(
+      key
+        .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1_$2')
+        .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1_$2')
+        .replace(/[^a-z0-9]/gi, '_'),
+    )
+  );
 }
 
-export function secretField(key: string) {
-  const normalized = key.replace(/[^a-z0-9]/gi, '');
-  return secretKey.test(normalized) || secretSuffix.test(normalized);
+function secretAssignmentSpans(input: string) {
+  const spans: RedactionSpan[] = [];
+  const value = new RegExp(assignmentValue);
+  let end = 0;
+  redactionMatches(input, secretAssignment, (match) => {
+    if (match.index < end || !secretField(match[3])) return;
+    value.lastIndex = match.index + match[0].length;
+    const found = value.exec(input);
+    if (!found) return;
+    end = value.lastIndex;
+    addRedactionSpan(spans, found.index, end, hidden);
+  });
+  return spans;
 }
 
 function validBasic(token: string) {
@@ -93,23 +113,14 @@ export function secretTextSpans(input: string) {
   suffix(privateRoute);
   suffix(privateQuery);
   suffix(privateUserInfo, 1);
-  suffix(secretAssignment);
+  for (const span of secretAssignmentSpans(input))
+    addRedactionSpan(spans, span.start, span.end, span.replacement);
   whole(base64Data, '[binary omitted]');
   return spans;
 }
 
 export function redactSecretText(value: string): string {
-  return value
-    .replace(privateKeyBlock, hidden)
-    .replace(bearerToken, hidden)
-    .replace(basicToken, (match, token: string) => (validBasic(token) ? hidden : match))
-    .replace(privateHeader, hidden)
-    .replace(new RegExp(tokenShapes, 'g'), hidden)
-    .replace(privateRoute, '$1[redacted]')
-    .replace(privateQuery, '$1[redacted]')
-    .replace(privateUserInfo, '$1[redacted]@')
-    .replace(secretAssignment, '$1[redacted]')
-    .replace(base64Data, '[binary omitted]');
+  return renderRedactionSpans(value, secretTextSpans(value));
 }
 
 function secretText(secrets: string[], minimumSecretLength = 8) {
@@ -124,8 +135,17 @@ function secretText(secrets: string[], minimumSecretLength = 8) {
     .sort((a, b) => b.length - a.length)
     .map((value) => value.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&'));
   const secretPattern = secretVariants.length ? new RegExp(secretVariants.join('|'), 'g') : null;
-  return (value: string): string =>
-    redactSecretText(secretPattern ? value.replace(secretPattern, hidden) : value);
+  return (value: string): string => {
+    const spans = secretTextSpans(value);
+    if (secretPattern)
+      redactionMatches(
+        value,
+        secretPattern,
+        (match) => addRedactionSpan(spans, match.index, match.index + match[0].length, hidden),
+        true,
+      );
+    return renderRedactionSpans(value, spans);
+  };
 }
 
 function compileRedactor(
@@ -207,7 +227,7 @@ function compileRedactor(
       if (Buffer.isBuffer(item) || item instanceof Uint8Array) return '[binary omitted]';
       if (item instanceof Date) return Number.isFinite(item.getTime()) ? item.toISOString() : null;
       if (Array.isArray(item)) {
-        if (typeof item[0] === 'string' && secretFieldName(item[0])) return [text(item[0]), hidden];
+        if (typeof item[0] === 'string' && secretField(item[0])) return [text(item[0]), hidden];
         const result = item.slice(0, 100).map((entry) => visit(entry, depth + 1));
         if (item.length > 100) result.push('[truncated]');
         return result;
@@ -280,10 +300,8 @@ export function createCommandRedactor(secrets: string[]) {
 
 export function withoutSecretKeys(value: unknown): unknown {
   if (Array.isArray(value)) {
-    const namedSecret = typeof value[0] === 'string' && secretFieldName(value[0]);
-    return value.map((entry, index) =>
-      namedSecret && index === 1 ? hidden : withoutSecretKeys(entry),
-    );
+    if (typeof value[0] === 'string' && secretField(value[0])) return [value[0], hidden];
+    return value.map(withoutSecretKeys);
   }
   if (!value || typeof value !== 'object') return value;
   const namedSecret = 'name' in value && typeof value.name === 'string' && secretField(value.name);

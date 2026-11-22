@@ -3363,6 +3363,36 @@ test('feedback redaction checks original text and structure before masking', asy
       privateParts: [opaque],
     },
     { id: 'tuple-control', input: tuple, privateParts: [opaque] },
+    ...[
+      'GITHUB_TOKEN',
+      'db_password',
+      'authToken',
+      'db_pwd',
+      'AUTH_OTP',
+      'authTOTP',
+      'CARD_PAN',
+      'service__api__key',
+    ].flatMap((name) => [
+      { id: `prefixed-object-${name}`, input: { [name]: opaque }, privateParts: [opaque] },
+      {
+        id: `prefixed-named-value-${name}`,
+        input: { name, value: opaque },
+        privateParts: [opaque],
+      },
+      {
+        id: `prefixed-tuple-${name}`,
+        input: [name, opaque, 'PrivateTrailingValue'],
+        privateParts: [opaque, 'PrivateTrailingValue'],
+      },
+      { id: `prefixed-assignment-${name}`, input: `${name}=${opaque}`, privateParts: [opaque] },
+    ]),
+    { id: 'prefixed-tuple-encoded', input: ['GITHUB_%54OKEN', opaque], privateParts: [opaque] },
+    {
+      id: 'prefixed-assignment-masked-label',
+      input: `GITHUB_TOKEN=${opaque}`,
+      secrets: ['GITHUB_TOKEN'],
+      privateParts: [opaque],
+    },
     {
       id: 'sentence-label-keeps-trailing-values',
       input: ['Enter your password', 'Public scalar detail', 'Another detail'],
