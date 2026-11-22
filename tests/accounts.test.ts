@@ -3339,6 +3339,10 @@ test('secret field values stay private in every supported representation', () =>
   const keyError = createTextRedactor(['PRIVATE KEY'])(keyBlock);
   assert.ok(keyError.startsWith('Synthetic failure:'));
   assert.ok(!keyError.includes(canary));
+  const manyPublicFields = `${'publicField=ok\n'.repeat(9000)}GITHUB_TOKEN=${canary}\nFinal public reason`;
+  const largeOutput = createTextRedactor([])(manyPublicFields);
+  assert.ok(!largeOutput.includes(canary));
+  assert.ok(largeOutput.endsWith('Final public reason'));
 });
 
 test('secret redaction keeps valid tokens when another token is missing', () => {

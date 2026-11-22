@@ -20,7 +20,7 @@ const secretSuffix = new RegExp(
 );
 const fieldCharacters = String.raw`[\p{L}\p{N}_.$-]`;
 const fieldIdentifier = new RegExp(`^${fieldCharacters}+$`, 'u');
-const secretAssignment = new RegExp(
+const assignmentPrefix = new RegExp(
   String.raw`((["']?)(?<!${fieldCharacters})(${fieldCharacters}+)\2\s*[:=]\s*)`,
   'gu',
 );
@@ -55,16 +55,16 @@ export function secretField(key: string) {
 
 function secretAssignmentSpans(input: string) {
   const spans: RedactionSpan[] = [];
+  const prefix = new RegExp(assignmentPrefix);
   const value = new RegExp(assignmentValue);
-  let end = 0;
-  redactionMatches(input, secretAssignment, (match) => {
-    if (match.index < end || !secretField(match[3])) return;
-    value.lastIndex = match.index + match[0].length;
+  for (let match = prefix.exec(input); match; match = prefix.exec(input)) {
+    if (!secretField(match[3])) continue;
+    value.lastIndex = prefix.lastIndex;
     const found = value.exec(input);
-    if (!found) return;
-    end = value.lastIndex;
-    addRedactionSpan(spans, found.index, end, hidden);
-  });
+    if (!found) continue;
+    addRedactionSpan(spans, found.index, value.lastIndex, hidden);
+    prefix.lastIndex = value.lastIndex;
+  }
   return spans;
 }
 
